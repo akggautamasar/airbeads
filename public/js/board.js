@@ -3,47 +3,98 @@
 // ============================================================
 
 /**
- * Node pixel positions within a 340×420 viewBox.
+ * REAL hourglass board (matching the hand-drawn original):
  *
- *   A(55,40)  B(170,40)  C(285,40)
- *   D(55,140) E(170,140) F(285,140)
- *                G(170,210)
- *   H(55,280) I(170,280) J(285,280)
- *   K(55,380) L(170,380) M(285,380)
+ *  Top row:      A ————— B ————— C        (wide)
+ *                 \      |      /
+ *  Upper mid:     D ——— E ——— F            (narrow inner row)
+ *                  \    |    /
+ *  Center:              G                  (pinch point)
+ *                  /    |    \
+ *  Lower mid:     H ——— I ——— J            (narrow inner row)
+ *                 /      |      \
+ *  Bottom row:   K ————— L ————— M        (wide)
+ *
+ *  The key visual: top corners A,C spread WIDE outward,
+ *  D,F pinch inward toward center G, then H,J pinch again,
+ *  and K,M spread wide again — true hourglass/bowtie shape.
  */
-const NODE_POSITIONS = {
-  A: { x: 55,  y: 40  },
-  B: { x: 170, y: 40  },
-  C: { x: 285, y: 40  },
-  D: { x: 55,  y: 140 },
+
+// Base positions (un-rotated, viewBox 340×440)
+const BASE_POSITIONS = {
+  //  Top row — wide
+  A: { x: 30,  y: 30  },
+  B: { x: 170, y: 30  },
+  C: { x: 310, y: 30  },
+  //  Upper middle — narrow
+  D: { x: 90,  y: 140 },
   E: { x: 170, y: 140 },
-  F: { x: 285, y: 140 },
-  G: { x: 170, y: 210 },
-  H: { x: 55,  y: 280 },
-  I: { x: 170, y: 280 },
-  J: { x: 285, y: 280 },
-  K: { x: 55,  y: 380 },
-  L: { x: 170, y: 380 },
-  M: { x: 285, y: 380 }
+  F: { x: 250, y: 140 },
+  //  Center pinch
+  G: { x: 170, y: 220 },
+  //  Lower middle — narrow
+  H: { x: 90,  y: 300 },
+  I: { x: 170, y: 300 },
+  J: { x: 250, y: 300 },
+  //  Bottom row — wide
+  K: { x: 30,  y: 410 },
+  L: { x: 170, y: 410 },
+  M: { x: 310, y: 410 }
 };
 
-// All edges to draw as lines (undirected)
+// All edges — matching the original drawing exactly
 const EDGES = [
+  // Top row horizontal
   ['A','B'], ['B','C'],
-  ['A','D'], ['B','E'], ['C','F'],
+  // Top row outer diagonals down to upper-mid corners
+  ['A','D'], ['C','F'],
+  // Upper mid horizontal
   ['D','E'], ['E','F'],
-  ['D','H'],            ['F','J'],
-  ['E','G'],
+  // Upper mid diagonals converging to center
+  ['D','G'], ['E','G'], ['F','G'],
+  // Lower mid diagonals spreading from center
   ['G','H'], ['G','I'], ['G','J'],
+  // Lower mid horizontal
   ['H','I'], ['I','J'],
-  ['H','K'], ['I','L'], ['J','M'],
-  ['K','L'], ['L','M']
+  // Lower mid outer diagonals down to bottom corners
+  ['H','K'], ['J','M'],
+  // Bottom row horizontal
+  ['K','L'], ['L','M'],
+  // Bottom mid vertical to bottom row
+  ['I','L']
 ];
 
+// Current rotation state: 0 = normal, 1 = 180° (flipped for P2 perspective)
+let _boardRotated = false;
+
+/** Get positions, possibly rotated 180° */
+function getNodePositions() {
+  if (!_boardRotated) return BASE_POSITIONS;
+  // Rotate 180° around centre of viewBox (170, 220)
+  const cx = 170, cy = 220;
+  const rotated = {};
+  for (const [name, pos] of Object.entries(BASE_POSITIONS)) {
+    rotated[name] = {
+      x: 2 * cx - pos.x,
+      y: 2 * cy - pos.y
+    };
+  }
+  return rotated;
+}
+
+/** Toggle board rotation */
+function rotateBoard() {
+  _boardRotated = !_boardRotated;
+  return _boardRotated;
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const NODE_RADIUS = 16;
+const NODE_RADIUS = 17;
 
 let _onNodeClick = null; // callback injected by app.js
+let _lastGameState = null;
+let _lastSelected = null;
+let _lastValidMoves = [];
 
 /**
  * Public API: initialise the board SVG.
@@ -51,13 +102,19 @@ let _onNodeClick = null; // callback injected by app.js
  */
 function initBoard(onNodeClick) {
   _onNodeClick = onNodeClick;
+  _drawBoard();
+}
+
+/** Internal: draw/redraw all lines and node circles */
+function _drawBoard() {
   const svg = document.getElementById('game-board');
   svg.innerHTML = '';
+  const NP = getNodePositions();
 
   // Draw edges first (below nodes)
   for (const [a, b] of EDGES) {
-    const pa = NODE_POSITIONS[a];
-    const pb = NODE_POSITIONS[b];
+    const pa = NP[a];
+    const pb = NP[b];
     const line = _svgEl('line', {
       x1: pa.x, y1: pa.y,
       x2: pb.x, y2: pb.y,
@@ -68,7 +125,7 @@ function initBoard(onNodeClick) {
   }
 
   // Draw node circles
-  for (const [name, pos] of Object.entries(NODE_POSITIONS)) {
+  for (const [name, pos] of Object.entries(NP)) {
     const circle = _svgEl('circle', {
       cx: pos.x,
       cy: pos.y,
@@ -82,6 +139,16 @@ function initBoard(onNodeClick) {
 }
 
 /**
+ * Toggle 180° rotation — call from app.js rotate button.
+ * Re-renders the board keeping current game state.
+ */
+function flipBoard() {
+  rotateBoard();
+  _drawBoard();
+  if (_lastGameState) renderBoard(_lastGameState, _lastSelected, _lastValidMoves);
+}
+
+/**
  * Re-render the board based on the current gameState.
  * @param {object} gameState
  * @param {string|null} selectedNode
@@ -89,8 +156,12 @@ function initBoard(onNodeClick) {
  */
 function renderBoard(gameState, selectedNode, validMoves) {
   if (!gameState) return;
-  const { board } = gameState;
+  // Cache for rotate re-renders
+  _lastGameState = gameState;
+  _lastSelected = selectedNode;
+  _lastValidMoves = validMoves || [];
 
+  const { board } = gameState;
   const validTo = {};
   if (validMoves) {
     for (const mv of validMoves) validTo[mv.to] = mv.isCapture;
@@ -98,7 +169,7 @@ function renderBoard(gameState, selectedNode, validMoves) {
 
   const svg = document.getElementById('game-board');
 
-  for (const [name] of Object.entries(NODE_POSITIONS)) {
+  for (const name of Object.keys(BASE_POSITIONS)) {
     const circle = svg.querySelector(`[data-node="${name}"]`);
     if (!circle) continue;
 
@@ -121,15 +192,14 @@ function renderBoard(gameState, selectedNode, validMoves) {
 
 /**
  * Animate a bead moving from one node to another.
- * Adds a temporary "ghost" circle along the path.
  */
 function animateMove(fromNode, toNode, playerNumber, onComplete) {
   const svg = document.getElementById('game-board');
-  const pFrom = NODE_POSITIONS[fromNode];
-  const pTo   = NODE_POSITIONS[toNode];
+  const NP = getNodePositions();
+  const pFrom = NP[fromNode];
+  const pTo   = NP[toNode];
   const color = playerNumber === 1 ? '#d45a2a' : '#4a8fc4';
 
-  // Ghost bead
   const ghost = _svgEl('circle', {
     cx: pFrom.x, cy: pFrom.y,
     r: NODE_RADIUS - 2,
@@ -139,34 +209,20 @@ function animateMove(fromNode, toNode, playerNumber, onComplete) {
   });
   svg.appendChild(ghost);
 
-  // Animate via WAAPI
-  const anim = ghost.animate([
-    { cx: pFrom.x, cy: pFrom.y },
-    { cx: pTo.x,   cy: pTo.y   }
-  ], {
-    duration: 260,
-    easing: 'cubic-bezier(0.4,0,0.2,1)',
-    fill: 'forwards'
-  });
-
-  // SVG doesn't animate cx/cy via WAAPI natively in all browsers,
-  // so we use a requestAnimationFrame approach instead:
   const startTime = performance.now();
-  const dur = 260;
+  const dur = 280;
 
   function step(now) {
     const t = Math.min((now - startTime) / dur, 1);
-    const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; // easeInOut
+    const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
     ghost.setAttribute('cx', pFrom.x + (pTo.x - pFrom.x) * ease);
     ghost.setAttribute('cy', pFrom.y + (pTo.y - pFrom.y) * ease);
     if (t < 1) requestAnimationFrame(step);
     else {
       ghost.remove();
-      anim.cancel();
       if (onComplete) onComplete();
     }
   }
-  anim.cancel();
   requestAnimationFrame(step);
 }
 
@@ -175,7 +231,8 @@ function animateMove(fromNode, toNode, playerNumber, onComplete) {
  */
 function animateCapture(capturedNode) {
   const svg = document.getElementById('game-board');
-  const pos = NODE_POSITIONS[capturedNode];
+  const NP = getNodePositions();
+  const pos = NP[capturedNode];
 
   const burst = _svgEl('circle', {
     cx: pos.x, cy: pos.y,
@@ -190,7 +247,7 @@ function animateCapture(capturedNode) {
   const dur = 350;
   function step(now) {
     const t = Math.min((now - startTime) / dur, 1);
-    burst.setAttribute('r', NODE_RADIUS + t * 18);
+    burst.setAttribute('r', NODE_RADIUS + t * 20);
     burst.setAttribute('opacity', 1 - t);
     if (t < 1) requestAnimationFrame(step);
     else burst.remove();
@@ -226,4 +283,4 @@ function _svgEl(tag, attrs) {
 }
 
 // Export to global scope (no bundler)
-window.Board = { initBoard, renderBoard, animateMove, animateCapture, celebrateWinner };
+window.Board = { initBoard, renderBoard, animateMove, animateCapture, celebrateWinner, flipBoard };
