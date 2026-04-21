@@ -168,6 +168,12 @@
       });
     });
 
+    $('btn-rotate').addEventListener('click', () => {
+      Board.flipBoard();
+      Sounds.select();
+      const isRotated = document.getElementById('btn-rotate').classList.toggle('rotated');
+    });
+
     $('btn-restart').addEventListener('click', () => {
       if (confirm('Request a new game?')) {
         socket.emit('request_rematch', { code: roomCode });
