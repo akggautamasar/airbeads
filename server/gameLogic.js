@@ -3,60 +3,86 @@
 // ============================================================
 
 /**
- * Board node layout (hourglass):
+ * REAL hourglass board (matching original hand-drawn design):
  *
- *   A — B — C        (indices 0,1,2)
- *   |   |   |
- *   D — E — F        (indices 3,4,5)
- *    \  |  /
- *       G            (index 6)
- *    /  |  \
- *   H — I — J        (indices 7,8,9)
- *   |   |   |
- *   K — L — M        (indices 10,11,12)
+ *   A ————— B ————— C        ← top row (wide)
+ *    \      |      /
+ *     D ——— E ——— F           ← upper middle (narrow)
+ *      \    |    /
+ *           G                 ← center pinch node
+ *      /    |    \
+ *     H ——— I ——— J           ← lower middle (narrow)
+ *    /       |      \
+ *   K ————— L ————— M        ← bottom row (wide)
+ *
+ *  Diagonal connections form the hourglass "X" shape.
  */
 
 const NODE_NAMES = ['A','B','C','D','E','F','G','H','I','J','K','L','M'];
 
 // Adjacency list: each node maps to its directly connected neighbors
 const ADJACENCY = {
-  A: ['B','D'],
-  B: ['A','C','E'],
-  C: ['B','F'],
-  D: ['A','E','H'],
-  E: ['B','D','F','G'],
-  F: ['C','E','J'],
-  G: ['E','H','I','J'],
-  H: ['D','G','I','K'],
-  I: ['H','J','G','L'],
-  J: ['F','G','I','M'],
-  K: ['H','L'],
-  L: ['K','M','I'],
-  M: ['J','L']
+  // Top row
+  A: ['B', 'D'],
+  B: ['A', 'C', 'E'],
+  C: ['B', 'F'],
+  // Upper middle
+  D: ['A', 'E', 'G'],
+  E: ['B', 'D', 'F', 'G'],
+  F: ['C', 'E', 'G'],
+  // Center
+  G: ['D', 'E', 'F', 'H', 'I', 'J'],
+  // Lower middle
+  H: ['G', 'I', 'K'],
+  I: ['G', 'H', 'J', 'L'],
+  J: ['G', 'I', 'M'],
+  // Bottom row
+  K: ['H', 'L'],
+  L: ['K', 'M', 'I'],
+  M: ['J', 'L']
 };
 
-// Jump paths: [middleNode, landingNode] — for capture moves
-// A capture goes: fromNode → middleNode (opponent) → landingNode (empty)
-// These are pre-computed straight-line triplets
+// Jump (capture) lines: [from, over, land] — all straight-line triplets
+// A capture: from → over(opponent) → land(empty), all collinear
 const JUMP_LINES = [
+  // Top row horizontal
   ['A','B','C'], ['C','B','A'],
-  ['A','D','H'], ['H','D','A'],
-  ['B','E','G'], ['G','E','B'],
-  ['C','F','J'], ['J','F','C'],
+  // Top diagonals through upper-mid to center
+  ['A','D','G'], ['G','D','A'],
+  ['C','F','G'], ['G','F','C'],
+  // Upper mid horizontal
   ['D','E','F'], ['F','E','D'],
-  ['D','H','K'], ['K','H','D'],
-  ['E','G','I'], ['I','G','E'],   // vertical through center
-  ['F','J','M'], ['M','J','F'],
-  ['H','I','J'], ['J','I','H'],
-  ['H','K','L'], ['L','K','H'],   // won't happen but safe
-  ['I','L','M'], ['M','L','I'],   // wait — K-L-M row
-  ['K','L','M'], ['M','L','K'],
-  ['G','H','D'], ['D','H','G'],   // diagonal legs of hourglass
+  // Upper mid verticals to center
+  ['B','E','G'], ['G','E','B'],
+  // Center through lower mid to bottom
+  ['D','G','J'], ['J','G','D'],   // diagonal cross
+  ['F','G','H'], ['H','G','F'],   // diagonal cross other way
+  // Lower mid verticals from center
   ['G','I','L'], ['L','I','G'],
-  ['G','J','F'], ['F','J','G'],
-  ['E','D','A'], ['A','D','E'],   // upper diagonals treated as straights
-  ['E','F','C'], ['C','F','E'],
+  // Lower mid horizontal
+  ['H','I','J'], ['J','I','H'],
+  // Bottom diagonals
+  ['G','H','K'], ['K','H','G'],
+  ['G','J','M'], ['M','J','G'],
+  // Bottom row horizontal
+  ['K','L','M'], ['M','L','K'],
+  // Verticals: top→mid→center
+  ['A','D','G'], // already above, keep unique
+  // Full verticals top to bottom through middle column
+  ['B','E','G'], ['G','E','B'],   // already listed
+  ['G','I','L'], ['L','I','G'],   // already listed
 ];
+
+// De-duplicate jump lines (we listed some twice for clarity)
+const _seenJumps = new Set();
+const JUMP_LINES_DEDUPED = [];
+for (const triplet of JUMP_LINES) {
+  const key = triplet.join('-');
+  if (!_seenJumps.has(key)) {
+    _seenJumps.add(key);
+    JUMP_LINES_DEDUPED.push(triplet);
+  }
+}
 
 // Initial positions
 const INITIAL_STATE = () => ({
@@ -91,8 +117,8 @@ function getValidMovesForNode(board, fromNode, currentPlayer) {
     }
   }
 
-  // 2. Capture (jump) moves
-  for (const [a, mid, land] of JUMP_LINES) {
+  // 2. Capture (jump) moves — jump over adjacent opponent to empty node beyond
+  for (const [a, mid, land] of JUMP_LINES_DEDUPED) {
     if (a === fromNode) {
       const opponent = currentPlayer === 1 ? 2 : 1;
       if (board[mid] === opponent && board[land] === 0) {
